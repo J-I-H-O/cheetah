@@ -73,3 +73,56 @@ Stop the World Event는 Garbage Collection의 수행이 끝나기 전까지 어�
 Major Garbage Collection은 수집해야 할 영역이 young generation보다 크기 때문에 속도가 훨씬 느려지는 경우가 많다.
 
 따라서 Major Garbage Collection은 최소화 해야한다.
+
+# 메타인지 인터뷰 질문내용
+
+## 1. Minor GC의 동작 과정에 대한 추가 설명
+Young Generation은 eden, survivor0, survivor1 세가지 영역으로 나뉜다.
+![image](https://github.com/user-attachments/assets/8500bc1f-08c8-4abe-8d7b-49415cf3ebaa)
+
+객체가 할당되는 곳은 eden이다.
+
+![image](https://github.com/user-attachments/assets/271d30ea-90d5-4bca-ae91-addfff8ba371)
+
+이후, eden이 가득차게 되면 Minor GC가 수행된다.
+
+![image](https://github.com/user-attachments/assets/ca942a63-0fa7-461f-8444-1d53f5712022)
+
+마킹과정을 거치고, 살아남은 객체는 survivor영역 중 하나를 선택해 들어가게 된다.
+이 때, 선택되는 survivor영역은 Minor GC발동 때마다, 서로 바뀌게 된다.
+
+![image](https://github.com/user-attachments/assets/e3dd82d7-790d-43d6-8ae5-4c5a873cc79d)
+
+다음 GC가 발동될 때는, aging과정이 들어간다. aging과정이란, survivor영역에서 마킹했을 때, 여전히 참조되고 있는 개객체들의 나이를 1씩 증가하는 과정이다.
+
+![image](https://github.com/user-attachments/assets/c7442c0a-70db-4f8e-a920-a5b7366e53ea)
+
+MinorGC가 발동될 때는 항상 eden영역과 survivor영역 한 곳이 같이 발동된다고 생각하면된다.
+
+survivor0가 사용중이였다면, survivor0 에서 살아남은 객체는 survivor1로 이동하고, eden역시 survivor1로 이동시킨다.
+
+즉, survivor영역은 하나의 영역만 사용된다.
+
+## 2. Stop The World 발생 시 GC를 실행하는 스레드 이외의 모든 스레드가 정지된다고하는데, 그렇다면 GC가 발생하는 동안 들어온 요청은 처리하지못하고 유실되는가?
+(나의 생각) 유실되지는 않고, 스레드풀의 accept-count에 의해 할당된 작업큐에 저장되고 있지않을까 싶다.
+
+왜냐하면, accept count의 큐는 Max connection과 달리 OS공간에서 관리되는 큐이다. 그렇기 때문에 어플리케이션의 GC에 영향을 받지않고 사용자요청을 받아서 기다리게 할 수 있을 것 같다.
+
+(테스트) accept count를 0으로하고 의도적으로 GC를 수행시키면 어떻게 될까?
+
+## 3. Major GC를 최소화하기 위해서는 어떤 부분을 튜닝해야하는가?
+1. Old Generation 크기를 늘리면 발생 빈도를 줄일 수 있다. 하지만, Stop The World Event의 시간이 더 증가할 가능성이 크다.
+2. 애플리케이션의 특성에 따라 적합한 GC 알고리즘을 선택하면 Major GC로 인한 STW 시간을 줄일 수 있다.
+* Throughput 중심:
+  * Parallel GC (Throughput GC): GC 성능을 극대화하고 처리량을 높이는 데 적합.
+* Low Latency 중심:
+  * G1 GC: Major GC를 여러 작은 단위의 GC로 나누어 STW 시간을 줄이는 GC.
+  * ZGC: 지연 시간을 최소화하고 초대형 힙을 지원.
+  * Shenandoah GC: 낮은 지연 시간과 짧은 STW를 목표로 함.
+3. 어플리케이션 레벨에서 객체를 현명하게 사용한다. 예를 들면, 래퍼타입보다는 원시타입을 사용. 공유자원을 사용. 등등. 
+
+
+## 4. 메모리 공간을 압축하면 왜 더 쉽고 빠르게 할당이 가능해지는가?
+메모리 공간을 압축한다는 것은, 사용중인 객체들 사이에 빈공간이 생기지 않도록 앞쪽으로 모두 땡기는 것이다.
+
+이후 새로운 객체 할당 시, 제일 끝 객체기준으로 메모리를 할당하면 되기 때문에 새로운 객체 할당이 쉽고 빠르다.
